@@ -18,6 +18,11 @@ const HOST = process.env.HOST || '127.0.0.1';
 
 // ---------------- Dokploy API ----------------
 const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
+// Strip secrets (credentials in URLs, GitHub PATs/tokens) from anything we log or return.
+const redact = (s) => String(s)
+  .replace(/(https?:\/\/)[^/@\s]+@/g, '$1***@')
+  .replace(/gh[posru]_[A-Za-z0-9_]{10,}/g, '***')
+  .replace(/github_pat_[A-Za-z0-9_]{10,}/g, '***');
 async function dokploy(base, key, route, method = 'GET', body) {
   const res = await fetch(`${trimSlash(base)}/api/${route}`, {
     method,
@@ -95,7 +100,7 @@ async function handleConnect(req, res) {
 async function handleDeploy(req, res) {
   const body = await readBody(req);
   res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' });
-  const log = (l) => res.write(String(l).replace(/\n/g, ' ') + '\n');
+  const log = (l) => res.write(redact(String(l)).replace(/\n/g, ' ') + '\n');
   const done = (obj) => { res.write('__RESULT__ ' + JSON.stringify(obj) + '\n'); res.end(); };
   try {
     const {
@@ -188,8 +193,9 @@ async function handleDeploy(req, res) {
     await dokploy(dokployUrl, apiKey, 'application.deploy', 'POST', { applicationId: appId });
     done({ ok: true, url: `${https ? 'https' : 'http'}://${host}`, applicationId: appId });
   } catch (e) {
-    log('ERROR: ' + String(e.message || e));
-    done({ ok: false, error: String(e.message || e) });
+    const msg = redact(String(e.message || e));
+    log('ERROR: ' + msg);
+    done({ ok: false, error: msg });
   }
 }
 
