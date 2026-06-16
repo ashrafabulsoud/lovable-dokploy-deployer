@@ -4,7 +4,7 @@
 #
 # The web app shells out to `git` to clone/push, so git is installed here.
 # It binds 0.0.0.0 inside the container so Dokploy/Traefik can reach it.
-FROM node:22-alpine
+FROM node:22-alpine AS runtime
 RUN apk add --no-cache git ca-certificates
 WORKDIR /app
 
