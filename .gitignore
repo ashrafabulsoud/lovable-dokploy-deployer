@@ -5,3 +5,7 @@ node_modules/
 webapp/.work/
 deploy-clones/
 *.log
+
+# local-only docs
+ROADMAP.md
+ROADMAP.html

@@ -30,6 +30,7 @@ deploy-kit/
   .dockerignore
   deploy-lovable.sh       # CLI automation: copies kit, pushes, creates+deploys the Dokploy app
   webapp/                 # interactive web app (npm start) — same flow in the browser
+  Dockerfile              # self-hosts the web app itself (Node, :4317) on Dokploy
   README.md
 ```
 
@@ -73,6 +74,14 @@ DOKPLOY_ENVIRONMENT_ID=...       # optional: pre-select the project environment
 When `DOKPLOY_URL` + `DOKPLOY_API_KEY` are set, the UI auto-connects on load; secret values stay on the
 server (the UI only learns *whether* they're present, never their value). Any field you leave blank in
 the form falls back to the environment.
+
+### Self-hosting the web app
+
+The root `Dockerfile` runs the web app as a Dokploy application (Node server on `:4317`). Deploy this
+repo like any other (Build Type = **Dockerfile**), then **protect it** — it can push to your GitHub and
+control your Dokploy, so put it behind **HTTP Basic Auth** (Dokploy → app → Advanced → Security) and set
+the secrets in the **Env tab** rather than typing them in the browser. The hosted container has no git
+credentials of its own, so `GITHUB_TOKEN` (a PAT with repo write access) is required there.
 
 ## Usage (CLI / automated)
 
@@ -121,3 +130,16 @@ no duplicates. URLs/slugs are cloned into `deploy-clones/<repo>` and `git pull`e
   module, copy `node_modules` into the SSR runtime stage too.
 - **HTTPS:** the script attaches an `sslip.io` host over HTTP. For a real domain, point DNS at the
   server and switch the domain's certificate to **Let's Encrypt** in Dokploy.
+
+## Status & roadmap
+
+Working MVP: connect → pick app → detect flavor → push kit → create/configure → deploy, with token
+redaction and env-based config. Highest-leverage next steps:
+
+- **Stream the Dokploy build log + verify the live URL** (currently it stops at "deploying").
+- **Idempotent app reuse in the web app** (match an existing app by repo to avoid duplicates).
+- **Lifecycle controls** (redeploy / stop / delete / logs) and **app env-var management** from the UI.
+- **Hardening:** real auth (beyond Basic Auth), encrypted secret storage, audit log.
+
+Note: the **Lovable → GitHub** link itself can't be automated — Lovable exposes no API for it, so that
+one connection stays a one-time manual step per project. Everything from GitHub onward is automated.
