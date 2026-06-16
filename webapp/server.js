@@ -68,7 +68,12 @@ function run(cmd, args, opts = {}, onLog) {
     const h = (buf) => { const s = buf.toString(); out += s; if (onLog) s.split(/\r?\n/).forEach((l) => l && onLog(l)); };
     p.stdout.on('data', h); p.stderr.on('data', h);
     p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} ${args.join(' ')} exited ${code}`))));
+    p.on('close', (code) => {
+      if (code === 0) return resolve(out);
+      // Surface git's actual stderr (last few lines) so failures are diagnosable.
+      const tail = out.trim().split(/\r?\n/).filter(Boolean).slice(-4).join(' | ');
+      reject(new Error(`${cmd} ${args.join(' ')} exited ${code}${tail ? ' — ' + tail : ''}`));
+    });
   });
 }
 function parseRepo(input) {
