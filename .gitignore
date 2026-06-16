@@ -1,0 +1,7 @@
+.omc/
+.DS_Store
+**/.DS_Store
+node_modules/
+webapp/.work/
+deploy-clones/
+*.log

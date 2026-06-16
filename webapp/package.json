@@ -1,0 +1,13 @@
+{
+  "name": "lovable-dokploy-deployer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive web app to deploy Lovable TanStack Start repos to Dokploy",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lovable → Dokploy deployer</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1b212d; --line:#262d3a;
+    --text:#e6eaf2; --muted:#8a94a6; --brand:#7c5cff; --brand2:#9d86ff;
+    --ok:#37d399; --err:#ff6b6b; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#1a1430 0,transparent 60%),var(--bg);
+    color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif;min-height:100vh}
+  .wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px}
+  .title{display:flex;align-items:center;gap:12px;margin:0 0 4px;font-size:24px;font-weight:700;letter-spacing:-.02em}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--brand);box-shadow:0 0 18px var(--brand)}
+  .sub{color:var(--muted);margin:0 0 28px}
+  .card{background:linear-gradient(180deg,var(--panel),#11151d);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;margin-bottom:18px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+  .card h2{margin:0 0 16px;font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600}
+  label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:9px;padding:11px 12px;font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}
+  input:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(124,92,255,.18)}
+  input::placeholder{color:#5b6373}
+  .hint{font-size:12px;color:#646d80;margin-top:5px}
+  .seg{display:flex;gap:8px}
+  .seg button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:10px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600}
+  .seg button.on{border-color:var(--brand);color:#fff;background:rgba(124,92,255,.14)}
+  button.btn{appearance:none;border:0;border-radius:10px;padding:12px 18px;font-size:14px;font-weight:700;cursor:pointer;
+    color:#fff;background:linear-gradient(180deg,var(--brand2),var(--brand));box-shadow:0 6px 20px rgba(124,92,255,.3)}
+  button.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);box-shadow:none}
+  .actions{display:flex;gap:10px;align-items:center}
+  .grow{flex:1}
+  .pill{font-size:12px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+  .pill.ok{color:var(--ok);border-color:rgba(55,211,153,.4)}
+  .hidden{display:none}
+  pre.log{background:#06080c;border:1px solid var(--line);border-radius:9px;padding:14px;max-height:320px;overflow:auto;
+    font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c5ccda;white-space:pre-wrap;word-break:break-word}
+  .result{padding:16px;border-radius:10px;margin-top:14px;border:1px solid var(--line);background:var(--panel2)}
+  .result.ok{border-color:rgba(55,211,153,.5)}
+  .result.err{border-color:rgba(255,107,107,.5)}
+  .result a{color:var(--brand2);font-weight:700;word-break:break-all}
+  .err-text{color:var(--err)}
+  a.link{color:var(--brand2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="title"><span class="dot"></span> Lovable → Dokploy</h1>
+  <p class="sub">Deploy any Lovable “TanStack Start” repo to Dokploy with auto-deploy on push.</p>
+
+  <!-- 1. Connect -->
+  <div class="card">
+    <h2>1 · Connect to Dokploy <span id="connPill" class="pill">not connected</span></h2>
+    <div class="row">
+      <div class="field"><label>Dokploy URL</label><input id="dokployUrl" placeholder="https://dokploy.example.com" /></div>
+      <div class="field"><label>Dokploy API key</label><input id="apiKey" type="password" placeholder="api token" /></div>
+    </div>
+    <div class="actions"><button class="btn" id="connectBtn">Connect</button>
+      <span id="connMsg" class="hint"></span></div>
+  </div>
+
+  <!-- 2. Configure -->
+  <div class="card hidden" id="configCard">
+    <h2>2 · Repo &amp; target</h2>
+    <div class="field"><label>GitHub repo (URL or owner/repo)</label>
+      <input id="repoUrl" placeholder="https://github.com/you/my-app  ·  or  you/my-app" /></div>
+    <div class="row">
+      <div class="field"><label>Branch</label><input id="branch" value="main" /></div>
+      <div class="field"><label>App name (optional)</label><input id="appName" placeholder="defaults to repo name" /></div>
+    </div>
+    <div class="field"><label>Build flavor</label>
+      <div class="seg" id="flavorSeg">
+        <button data-v="static" class="on">Static (landing page · nginx)</button>
+        <button data-v="ssr">SSR (full app · Node)</button>
+      </div>
+      <div class="hint" id="flavorHint">Static: light, client-rendered. SSR: runs the real app server (server functions/SSR).</div>
+    </div>
+    <div class="field"><label>Project / environment</label><select id="envSelect"></select></div>
+    <div class="field"><label>GitHub provider</label><select id="ghSelect"></select></div>
+
+    <div class="field"><label>App</label>
+      <div class="seg" id="modeSeg">
+        <button data-v="new" class="on">Create new app</button>
+        <button data-v="existing">Use existing app</button>
+      </div>
+    </div>
+    <div class="field hidden" id="existingWrap"><label>Existing app in this environment</label><select id="existingApp"></select></div>
+
+    <div class="row">
+      <div class="field"><label>Custom domain (optional)</label><input id="customDomain" placeholder="blank = random sslip.io" /></div>
+      <div class="field"><label>GitHub token (optional)</label><input id="githubToken" type="password" placeholder="blank = use machine git auth" /></div>
+    </div>
+    <div class="hint">Custom domain uses Let’s Encrypt — point its DNS at the Dokploy server first. A token is only needed if the machine running this isn’t already authed to push.</div>
+
+    <div class="actions" style="margin-top:8px"><button class="btn" id="deployBtn">🚀 Deploy</button></div>
+  </div>
+
+  <!-- 3. Output -->
+  <div class="card hidden" id="outCard">
+    <h2>3 · Deploy log</h2>
+    <pre class="log" id="log"></pre>
+    <div id="result"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let DATA = { projects: [], githubProviders: [] };
+let flavor = 'static', mode = 'new';
+
+// segmented controls
+function seg(segId, cb){
+  $(segId).addEventListener('click', (e)=>{
+    const b = e.target.closest('button'); if(!b) return;
+    [...$(segId).children].forEach(x=>x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v);
+  });
+}
+seg('flavorSeg', v=>{ flavor=v; });
+seg('modeSeg', v=>{ mode=v; $('existingWrap').classList.toggle('hidden', v==='new'); });
+
+function fillEnvs(){
+  const sel = $('envSelect'); sel.innerHTML='';
+  DATA.projects.forEach((p,pi)=> p.environments.forEach((e,ei)=>{
+    const o=document.createElement('option'); o.value=pi+':'+ei; o.textContent=`${p.name} / ${e.name}`; sel.appendChild(o);
+  }));
+  sel.onchange = fillExistingApps; fillExistingApps();
+}
+function currentEnv(){ const [pi,ei]=$('envSelect').value.split(':').map(Number); return DATA.projects[pi]?.environments[ei]; }
+function fillExistingApps(){
+  const e=currentEnv(); const sel=$('existingApp'); sel.innerHTML='';
+  const apps=(e&&e.applications)||[];
+  if(!apps.length){ const o=document.createElement('option'); o.textContent='(no apps in this environment)'; o.value=''; sel.appendChild(o); return; }
+  apps.forEach(a=>{ const o=document.createElement('option'); o.value=a.applicationId; o.textContent=`${a.name} — ${a.status||''}`; sel.appendChild(o); });
+}
+function fillProviders(){
+  const sel=$('ghSelect'); sel.innerHTML='';
+  if(!DATA.githubProviders.length){ const o=document.createElement('option'); o.value=''; o.textContent='(no GitHub provider found)'; sel.appendChild(o); return; }
+  DATA.githubProviders.forEach(g=>{ const o=document.createElement('option'); o.value=g.githubId; o.textContent=g.name; sel.appendChild(o); });
+}
+
+$('connectBtn').addEventListener('click', async ()=>{
+  const dokployUrl=$('dokployUrl').value.trim(), apiKey=$('apiKey').value.trim();
+  if(!dokployUrl||!apiKey){ $('connMsg').textContent='Enter URL and API key.'; return; }
+  $('connectBtn').disabled=true; $('connMsg').textContent='connecting…';
+  try{
+    const r=await fetch('/api/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({dokployUrl,apiKey})});
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||'connect failed');
+    DATA=j; fillEnvs(); fillProviders();
+    $('configCard').classList.remove('hidden');
+    $('connPill').textContent='connected'; $('connPill').classList.add('ok');
+    $('connMsg').textContent=`${j.projects.length} project(s), ${j.githubProviders.length} GitHub provider(s)`;
+  }catch(e){ $('connMsg').innerHTML='<span class="err-text">'+e.message+'</span>'; }
+  finally{ $('connectBtn').disabled=false; }
+});
+
+$('deployBtn').addEventListener('click', async ()=>{
+  const env=currentEnv();
+  const payload={
+    dokployUrl:$('dokployUrl').value.trim(), apiKey:$('apiKey').value.trim(),
+    environmentId: env?env.environmentId:'', githubId:$('ghSelect').value,
+    repoUrl:$('repoUrl').value.trim(), branch:$('branch').value.trim()||'main',
+    flavor, appName:$('appName').value.trim(), mode,
+    existingAppId: mode==='existing' ? $('existingApp').value : '',
+    customDomain:$('customDomain').value.trim(), githubToken:$('githubToken').value.trim(),
+  };
+  if(!payload.repoUrl){ alert('Enter a GitHub repo'); return; }
+  $('outCard').classList.remove('hidden'); $('log').textContent=''; $('result').innerHTML='';
+  $('deployBtn').disabled=true;
+  try{
+    const resp=await fetch('/api/deploy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+    const reader=resp.body.getReader(); const dec=new TextDecoder(); let buf='';
+    const append=(l)=>{ const el=$('log'); el.textContent+=l+'\n'; el.scrollTop=el.scrollHeight; };
+    while(true){
+      const {done,value}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true}); let i;
+      while((i=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,i); buf=buf.slice(i+1);
+        if(line.startsWith('__RESULT__ ')){ showResult(JSON.parse(line.slice(11))); }
+        else if(line) append(line);
+      }
+    }
+  }catch(e){ showResult({ok:false,error:e.message}); }
+  finally{ $('deployBtn').disabled=false; }
+});
+
+function showResult(r){
+  const el=$('result');
+  if(r.ok){ el.className='result ok';
+    el.innerHTML=`✅ <b>Deploying.</b> It will be live shortly at:<br><a href="${r.url}" target="_blank">${r.url}</a>`
+      +`<div class="hint">Auto-deploy on push is enabled. Watch the build in Dokploy.</div>`; }
+  else{ el.className='result err'; el.innerHTML=`❌ <span class="err-text">${r.error||'failed'}</span>`; }
+}
+</script>
+</body>
+</html>
