@@ -70,7 +70,10 @@
   <div class="card hidden" id="configCard">
     <h2>2 · Repo &amp; target</h2>
     <div class="field"><label>GitHub repo (URL or owner/repo)</label>
-      <input id="repoUrl" placeholder="https://github.com/you/my-app  ·  or  you/my-app" /></div>
+      <div style="display:flex;gap:8px">
+        <input id="repoUrl" class="grow" placeholder="https://github.com/you/my-app  ·  or  you/my-app" />
+        <button class="btn ghost" id="detectBtn" type="button">Detect flavor</button>
+      </div></div>
     <div class="row">
       <div class="field"><label>Branch</label><input id="branch" value="main" /></div>
       <div class="field"><label>App name (optional)</label><input id="appName" placeholder="defaults to repo name" /></div>
@@ -81,6 +84,7 @@
         <button data-v="ssr">SSR (full app · Node)</button>
       </div>
       <div class="hint" id="flavorHint">Static: light, client-rendered. SSR: runs the real app server (server functions/SSR).</div>
+      <div class="hint" id="detectNote"></div>
     </div>
     <div class="field"><label>Project / environment</label><select id="envSelect"></select></div>
     <div class="field"><label>GitHub provider</label><select id="ghSelect"></select></div>
@@ -113,7 +117,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let DATA = { projects: [], githubProviders: [] };
-let flavor = 'static', mode = 'new';
+let CFG = {};                 // what's preset from the server environment
+let flavor = 'static', mode = 'new', lastDetected = '';
 
 // segmented controls
 function seg(segId, cb){
@@ -145,20 +150,29 @@ function fillProviders(){
   DATA.githubProviders.forEach(g=>{ const o=document.createElement('option'); o.value=g.githubId; o.textContent=g.name; sel.appendChild(o); });
 }
 
-$('connectBtn').addEventListener('click', async ()=>{
+function applyDefaults(){
+  if(CFG.environmentId){
+    DATA.projects.forEach((p,pi)=>p.environments.forEach((e,ei)=>{ if(e.environmentId===CFG.environmentId) $('envSelect').value=pi+':'+ei; }));
+    fillExistingApps();
+  }
+  if(CFG.githubId) $('ghSelect').value=CFG.githubId;
+}
+async function doConnect(){
   const dokployUrl=$('dokployUrl').value.trim(), apiKey=$('apiKey').value.trim();
-  if(!dokployUrl||!apiKey){ $('connMsg').textContent='Enter URL and API key.'; return; }
+  if((!dokployUrl && !CFG.dokployUrl) || (!apiKey && !CFG.hasApiKey)){
+    $('connMsg').textContent='Enter URL and API key (or set them in the environment).'; return; }
   $('connectBtn').disabled=true; $('connMsg').textContent='connecting…';
   try{
     const r=await fetch('/api/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({dokployUrl,apiKey})});
     const j=await r.json(); if(!r.ok) throw new Error(j.error||'connect failed');
-    DATA=j; fillEnvs(); fillProviders();
+    DATA=j; fillEnvs(); fillProviders(); applyDefaults();
     $('configCard').classList.remove('hidden');
     $('connPill').textContent='connected'; $('connPill').classList.add('ok');
     $('connMsg').textContent=`${j.projects.length} project(s), ${j.githubProviders.length} GitHub provider(s)`;
   }catch(e){ $('connMsg').innerHTML='<span class="err-text">'+e.message+'</span>'; }
   finally{ $('connectBtn').disabled=false; }
-});
+}
+$('connectBtn').addEventListener('click', doConnect);
 
 $('deployBtn').addEventListener('click', async ()=>{
   const env=currentEnv();
@@ -197,6 +211,35 @@ function showResult(r){
       +`<div class="hint">Auto-deploy on push is enabled. Watch the build in Dokploy.</div>`; }
   else{ el.className='result err'; el.innerHTML=`❌ <span class="err-text">${r.error||'failed'}</span>`; }
 }
+
+// --- auto-detect build flavor by scanning the repo ---
+function setFlavor(v){ flavor=v; [...$('flavorSeg').children].forEach(b=>b.classList.toggle('on', b.dataset.v===v)); }
+async function detect(){
+  const repoUrl=$('repoUrl').value.trim();
+  if(!repoUrl || repoUrl===lastDetected) return; lastDetected=repoUrl;
+  $('detectNote').textContent='🔎 scanning repo…';
+  try{
+    const r=await fetch('/api/detect',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({repoUrl, branch:$('branch').value.trim()||'main', githubToken:$('githubToken').value.trim()})});
+    const j=await r.json();
+    if(j.flavor){ setFlavor(j.flavor); $('detectNote').textContent='🔎 '+j.reason+(j.signals&&j.signals.length?' ['+j.signals.join(', ')+']':''); }
+    else { $('detectNote').textContent='🔎 '+(j.reason||'could not detect — pick manually'); lastDetected=''; }
+  }catch(e){ $('detectNote').textContent='detect failed: '+e.message; lastDetected=''; }
+}
+$('detectBtn').addEventListener('click', ()=>{ lastDetected=''; detect(); });
+$('repoUrl').addEventListener('blur', detect);
+
+// --- prefill from server environment (Dokploy Env tab / local .env) ---
+async function loadConfig(){
+  try{
+    CFG = await (await fetch('/api/config')).json();
+    if(CFG.dokployUrl) $('dokployUrl').value=CFG.dokployUrl;
+    if(CFG.hasApiKey) $('apiKey').placeholder='loaded from environment ✓';
+    if(CFG.hasGithubToken) $('githubToken').placeholder='loaded from environment ✓';
+    if(CFG.dokployUrl && CFG.hasApiKey){ $('connMsg').textContent='auto-connecting from environment…'; doConnect(); }
+  }catch{ /* no config endpoint — manual entry */ }
+}
+loadConfig();
 </script>
 </body>
 </html>

@@ -52,8 +52,27 @@ npm start            # or: node server.js
 
 Flow: **Connect** (Dokploy URL + API key) → it lists projects/environments + GitHub providers →
 enter the GitHub repo, pick **static/ssr**, choose **new or existing app**, optional custom domain →
-**Deploy**. No `npm install` needed (pure Node ≥18). Binds to localhost only; your API key stays on
-your machine. A GitHub token field is optional — leave blank to use the machine's existing git auth.
+**Deploy**. No `npm install` needed (pure Node ≥18). Binds to localhost only.
+
+**Auto-detect flavor:** type a repo URL (or click *Detect flavor*) and the app scans the repo for
+server-side code (`createServerFn`, API routes, `*.server.ts`, …) and pre-selects **SSR** if found,
+else **Static**.
+
+**Config from environment (no secrets in the browser):** the server reads these from its environment
+— set them in the Dokploy app's **Env tab** when self-hosting, or a local **`.env`** file (auto-loaded
+on Node ≥20.6):
+
+```
+DOKPLOY_URL=https://your-dokploy.host
+DOKPLOY_API_KEY=...
+GITHUB_TOKEN=...                 # PAT with repo write access (needed in the hosted container)
+DOKPLOY_GITHUB_ID=...            # optional: pre-select the GitHub provider
+DOKPLOY_ENVIRONMENT_ID=...       # optional: pre-select the project environment
+```
+
+When `DOKPLOY_URL` + `DOKPLOY_API_KEY` are set, the UI auto-connects on load; secret values stay on the
+server (the UI only learns *whether* they're present, never their value). Any field you leave blank in
+the form falls back to the environment.
 
 ## Usage (CLI / automated)
 

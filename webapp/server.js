@@ -13,8 +13,19 @@ const path = require('path');
 const KIT_DIR = path.join(__dirname, '..');           // the deploy-kit/ folder (Dockerfiles etc.)
 const PUBLIC = path.join(__dirname, 'public');
 const WORK = path.join(__dirname, '.work');           // scratch clones
+// Load .env for local runs (on Dokploy these come from the app's Env tab).
+try { process.loadEnvFile(); } catch { /* no .env file — fine */ }
 const PORT = process.env.PORT || 4317;
 const HOST = process.env.HOST || '127.0.0.1';
+
+// Server-side config from environment. Secrets never leave the server.
+const ENV = {
+  dokployUrl: process.env.DOKPLOY_URL || '',
+  apiKey: process.env.DOKPLOY_API_KEY || '',
+  githubToken: process.env.GITHUB_TOKEN || '',
+  githubId: process.env.DOKPLOY_GITHUB_ID || '',
+  environmentId: process.env.DOKPLOY_ENVIRONMENT_ID || '',
+};
 
 // ---------------- Dokploy API ----------------
 const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
@@ -73,7 +84,9 @@ function parseRepo(input) {
 
 // ---------------- /api/connect : list projects + github providers ----------------
 async function handleConnect(req, res) {
-  const { dokployUrl, apiKey } = await readBody(req);
+  const b = await readBody(req);
+  const dokployUrl = b.dokployUrl || ENV.dokployUrl;
+  const apiKey = b.apiKey || ENV.apiKey;
   if (!dokployUrl || !apiKey) return sendJson(res, 400, { error: 'dokployUrl and apiKey are required' });
   try {
     const projects = await dokploy(dokployUrl, apiKey, 'project.all', 'GET');
@@ -103,10 +116,13 @@ async function handleDeploy(req, res) {
   const log = (l) => res.write(redact(String(l)).replace(/\n/g, ' ') + '\n');
   const done = (obj) => { res.write('__RESULT__ ' + JSON.stringify(obj) + '\n'); res.end(); };
   try {
-    const {
-      dokployUrl, apiKey, environmentId, githubId, repoUrl, branch = 'main',
-      flavor = 'static', appName, mode = 'new', existingAppId, customDomain, githubToken,
-    } = body;
+    const { repoUrl, branch = 'main', flavor = 'static', appName, mode = 'new', existingAppId, customDomain } = body;
+    // Secrets/ids fall back to server environment (Dokploy Env tab / local .env).
+    const dokployUrl = body.dokployUrl || ENV.dokployUrl;
+    const apiKey = body.apiKey || ENV.apiKey;
+    const githubId = body.githubId || ENV.githubId;
+    const environmentId = body.environmentId || ENV.environmentId;
+    const githubToken = body.githubToken || ENV.githubToken;
     for (const [k, v] of Object.entries({ dokployUrl, apiKey, githubId, repoUrl })) if (!v) throw new Error('Missing input: ' + k);
     if (mode === 'new' && !environmentId) throw new Error('Missing input: environmentId');
     if (mode === 'existing' && !existingAppId) throw new Error('Pick an existing app');
@@ -199,6 +215,64 @@ async function handleDeploy(req, res) {
   }
 }
 
+// ---------------- /api/config : what's preset from the environment ----------------
+function handleConfig(req, res) {
+  sendJson(res, 200, {
+    dokployUrl: ENV.dokployUrl,
+    hasApiKey: !!ENV.apiKey,
+    hasGithubToken: !!ENV.githubToken,
+    githubId: ENV.githubId,
+    environmentId: ENV.environmentId,
+  });
+}
+
+// ---------------- /api/detect : recommend static vs ssr by scanning the repo ----------------
+const SERVER_RE = /createServerFn|createServerFileRoute|createAPIFileRoute|createServerRoute|useServerFn|@tanstack\/react-start\/server/;
+async function detectFlavor(root) {
+  const signals = new Set();
+  const exts = new Set(['.ts', '.tsx', '.js', '.jsx']);
+  async function walk(d) {
+    let entries; try { entries = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (['node_modules', '.git', 'dist', '.output'].includes(e.name)) continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { await walk(p); }
+      else if (exts.has(path.extname(e.name))) {
+        if (/\.server\.(t|j)sx?$/.test(e.name)) signals.add(e.name);
+        try { const m = (await fsp.readFile(p, 'utf8')).match(SERVER_RE); if (m) signals.add(m[0]); } catch { /* skip */ }
+      }
+    }
+  }
+  await walk(root);
+  const arr = [...signals].slice(0, 6);
+  return arr.length
+    ? { flavor: 'ssr', reason: 'Found server-side code — SSR recommended', signals: arr }
+    : { flavor: 'static', reason: 'No server-side code found — Static recommended', signals: [] };
+}
+async function handleDetect(req, res) {
+  const body = await readBody(req);
+  const { repoUrl, branch = 'main' } = body;
+  const token = body.githubToken || ENV.githubToken;
+  if (!repoUrl) return sendJson(res, 400, { error: 'repoUrl is required' });
+  let dir;
+  try {
+    const { owner, repo } = parseRepo(repoUrl);
+    await fsp.mkdir(WORK, { recursive: true });
+    dir = path.join(WORK, '__detect__' + repo);
+    await fsp.rm(dir, { recursive: true, force: true });
+    const url = token
+      ? `https://x-access-token:${token}@github.com/${owner}/${repo}.git`
+      : `https://github.com/${owner}/${repo}.git`;
+    await run('git', ['clone', '--depth', '1', '--branch', branch, url, dir]);
+    const result = await detectFlavor(dir);
+    sendJson(res, 200, result);
+  } catch (e) {
+    sendJson(res, 200, { flavor: null, reason: 'Could not scan repo (private without a token?): ' + redact(String(e.message || e)) });
+  } finally {
+    if (dir) await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // ---------------- static + routing ----------------
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 async function serveStatic(res, file) {
@@ -213,7 +287,9 @@ async function serveStatic(res, file) {
 
 http.createServer(async (req, res) => {
   try {
+    if (req.method === 'GET' && req.url === '/api/config') return handleConfig(req, res);
     if (req.method === 'POST' && req.url === '/api/connect') return handleConnect(req, res);
+    if (req.method === 'POST' && req.url === '/api/detect') return handleDetect(req, res);
     if (req.method === 'POST' && req.url === '/api/deploy') return handleDeploy(req, res);
     if (req.method === 'GET') return serveStatic(res, req.url === '/' ? 'index.html' : req.url.replace(/^\//, '').split('?')[0]);
     res.writeHead(404); res.end('not found');
