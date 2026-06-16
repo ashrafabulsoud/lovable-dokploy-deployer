@@ -140,7 +140,7 @@ async function handleDeploy(req, res) {
       ? `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`
       : `https://github.com/${owner}/${repo}.git`;
     log('cloning repo...');
-    await run('git', ['clone', '--depth', '1', '--branch', branch, cloneUrl, dir], {}, log);
+    await run('git', ['clone', '--depth', '1', '--branch', branch, cloneUrl, dir], { env: { GIT_TERMINAL_PROMPT: '0' } }, log);
 
     // add kit (additive; never touches vite.config.ts)
     log('adding deploy kit...');
@@ -259,15 +259,22 @@ async function handleDetect(req, res) {
     const { owner, repo } = parseRepo(repoUrl);
     await fsp.mkdir(WORK, { recursive: true });
     dir = path.join(WORK, '__detect__' + repo);
-    await fsp.rm(dir, { recursive: true, force: true });
-    const url = token
-      ? `https://x-access-token:${token}@github.com/${owner}/${repo}.git`
-      : `https://github.com/${owner}/${repo}.git`;
-    await run('git', ['clone', '--depth', '1', '--branch', branch, url, dir]);
-    const result = await detectFlavor(dir);
-    sendJson(res, 200, result);
+    const base = `github.com/${owner}/${repo}.git`;
+    // Read-only scan: try anonymous first (works for public repos, ignores a bad/revoked
+    // token), then fall back to the token only if needed (private repos).
+    const urls = [`https://${base}`, ...(token ? [`https://x-access-token:${token}@${base}`] : [])];
+    let cloned = false, lastErr;
+    for (const url of urls) {
+      try {
+        await fsp.rm(dir, { recursive: true, force: true });
+        await run('git', ['clone', '--depth', '1', '--branch', branch, url, dir], { env: { GIT_TERMINAL_PROMPT: '0' } });
+        cloned = true; break;
+      } catch (e) { lastErr = e; }
+    }
+    if (!cloned) throw lastErr;
+    sendJson(res, 200, await detectFlavor(dir));
   } catch (e) {
-    sendJson(res, 200, { flavor: null, reason: 'Could not scan repo (private without a token?): ' + redact(String(e.message || e)) });
+    sendJson(res, 200, { flavor: null, reason: 'Could not scan the repo — check the URL/branch; for a private repo, provide a token that can read it. (' + redact(String(e.message || e)) + ')' });
   } finally {
     if (dir) await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
